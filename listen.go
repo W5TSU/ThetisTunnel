@@ -14,11 +14,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 )
 
-func runListen(ctx context.Context, cfg *Config, stats *Stats) error {
+func runListen(ctx context.Context, cfg *Config, stats *Stats, ulog *UILogger) error {
 	if cfg.RadioIP == "" {
 		return fmt.Errorf("--radioIp is required in listen mode")
 	}
@@ -43,7 +42,7 @@ func runListen(ctx context.Context, cfg *Config, stats *Stats) error {
 		ln.Close()
 	}()
 
-	fmt.Printf("Listening on TCP %s\n", tcpAddr)
+	ulog.Log("Listening on TCP %s", tcpAddr)
 
 	for {
 		conn, err := ln.Accept()
@@ -55,34 +54,38 @@ func runListen(ctx context.Context, cfg *Config, stats *Stats) error {
 				return fmt.Errorf("TCP accept: %w", err)
 			}
 		}
-		fmt.Printf("Connected: %s\n", conn.RemoteAddr())
-		handleListenConn(ctx, conn, cfg, radioSrcPorts, stats)
-		fmt.Printf("Disconnected\n")
+		ulog.Log("Connected: %s", conn.RemoteAddr())
+		handleListenConn(ctx, conn, cfg, radioSrcPorts, stats, ulog)
+		ulog.Log("Disconnected")
 	}
 }
 
-func handleListenConn(ctx context.Context, tcpConn net.Conn, cfg *Config, radioSrcPorts []uint16, stats *Stats) {
+func handleListenConn(ctx context.Context, tcpConn net.Conn, cfg *Config, radioSrcPorts []uint16, stats *Stats, ulog *UILogger) {
 	defer tcpConn.Close()
 
+	ulog.Debugf("Auth: reading key from %s", tcpConn.RemoteAddr())
 	if err := authListen(tcpConn, cfg.Key); err != nil {
-		log.Printf("Auth failed from %s: %v", tcpConn.RemoteAddr(), err)
+		ulog.Log("Auth failed from %s: %v", tcpConn.RemoteAddr(), err)
 		return
 	}
+	ulog.Debugf("Auth: accepted key from %s", tcpConn.RemoteAddr())
 
 	// Open the UDP proxy socket with SO_BROADCAST so discovery frames can be relayed.
 	udpBindAddr := fmt.Sprintf("%s:%d", cfg.UDPBindIP, cfg.RadioProxyPort)
+	ulog.Debugf("UDP: binding proxy socket on %s", udpBindAddr)
 	udpConn, err := listenPacketBroadcast(ctx, udpBindAddr)
 	if err != nil {
-		log.Printf("UDP bind on %s: %v", udpBindAddr, err)
+		ulog.Log("UDP bind on %s: %v", udpBindAddr, err)
 		return
 	}
 	defer udpConn.Close()
 
 	radioIP := net.ParseIP(cfg.RadioIP).To4()
 	if radioIP == nil {
-		log.Printf("Invalid radio IP: %s", cfg.RadioIP)
+		ulog.Log("Invalid radio IP: %s", cfg.RadioIP)
 		return
 	}
+	ulog.Debugf("Radio target: %s, src port filter: %v", cfg.RadioIP, cfg.RadioSrcRange)
 
 	tcpReadDone := make(chan struct{})
 
@@ -97,9 +100,10 @@ func handleListenConn(ctx context.Context, tcpConn net.Conn, cfg *Config, radioS
 			stats.TCPBytesIn.Add(int64(4 + len(payload)))
 
 			dest := &net.UDPAddr{IP: radioIP, Port: int(port)}
+			ulog.Debugf("TCP→UDP: port=%d len=%d → %s", port, len(payload), dest)
 			n, err := udpConn.WriteTo(payload, dest)
 			if err != nil {
-				log.Printf("UDP write to radio: %v", err)
+				ulog.Log("UDP write to radio: %v", err)
 				continue
 			}
 			stats.UDPBytesOut.Add(int64(n))
@@ -120,6 +124,7 @@ func handleListenConn(ctx context.Context, tcpConn net.Conn, cfg *Config, radioS
 			}
 			srcPort := uint16(udpAddr.Port)
 			if !portInList(radioSrcPorts, srcPort) {
+				ulog.Debugf("UDP→TCP: dropped packet from %s (port %d not in src range)", addr, srcPort)
 				continue
 			}
 			stats.UDPBytesIn.Add(int64(n))
@@ -128,9 +133,11 @@ func handleListenConn(ctx context.Context, tcpConn net.Conn, cfg *Config, radioS
 			copy(payload, buf[:n])
 
 			if cfg.Broadcast1024 && srcPort == 1024 && isDiscoveryFrame(payload) {
+				ulog.Debugf("UDP→TCP: discovery frame from port 1024, broadcasting on radio subnet")
 				broadcastDiscovery(udpConn, payload, radioIP)
 			}
 
+			ulog.Debugf("UDP→TCP: port=%d len=%d from %s", srcPort, n, addr)
 			if err := writeFrame(tcpConn, srcPort, payload); err != nil {
 				return
 			}

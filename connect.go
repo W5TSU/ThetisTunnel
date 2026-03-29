@@ -23,19 +23,18 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
 )
 
-func runConnect(ctx context.Context, cfg *Config, stats *Stats) error {
+func runConnect(ctx context.Context, cfg *Config, stats *Stats, ulog *UILogger) error {
 	if cfg.TCPHost == "" {
 		return fmt.Errorf("--tcpHost is required in connect mode")
 	}
 
 	tcpAddr := fmt.Sprintf("%s:%d", cfg.TCPHost, cfg.TCPPort)
-	fmt.Printf("Connecting to TCP %s\n", tcpAddr)
+	ulog.Log("Connecting to TCP %s", tcpAddr)
 
 	tcpConn, err := net.Dial("tcp4", tcpAddr)
 	if err != nil {
@@ -48,18 +47,20 @@ func runConnect(ctx context.Context, cfg *Config, stats *Stats) error {
 		tcpConn.Close()
 	}()
 
+	ulog.Debugf("Auth: sending key to %s", tcpAddr)
 	if err := authConnect(tcpConn, cfg.Key); err != nil {
 		return fmt.Errorf("authentication: %w", err)
 	}
-	fmt.Println("Connected and authenticated.")
+	ulog.Log("Connected and authenticated.")
+	ulog.Debugf("Auth: key accepted by listener")
 
-	return runConnectOnConn(ctx, tcpConn, cfg, stats)
+	return runConnectOnConn(ctx, tcpConn, cfg, stats, ulog)
 }
 
 // runConnectOnConn is the inner loop for connect mode.  It expects the TCP
 // connection to be already authenticated and takes ownership of it.
 // Extracted as a separate function so tests can inject an in-process pipe.
-func runConnectOnConn(ctx context.Context, tcpConn net.Conn, cfg *Config, stats *Stats) error {
+func runConnectOnConn(ctx context.Context, tcpConn net.Conn, cfg *Config, stats *Stats, ulog *UILogger) error {
 	thetisPortList, err := parsePorts(cfg.ThetisPorts)
 	if err != nil {
 		return fmt.Errorf("--thetisPorts: %w", err)
@@ -77,7 +78,7 @@ func runConnectOnConn(ctx context.Context, tcpConn net.Conn, cfg *Config, stats 
 			return fmt.Errorf("UDP bind on %s: %w", addr, err)
 		}
 		udpSockets[port] = pc
-		fmt.Printf("Intercepting Thetis UDP on %s\n", addr)
+		ulog.Log("Intercepting Thetis UDP on %s", addr)
 	}
 	defer func() {
 		for _, s := range udpSockets {
@@ -106,7 +107,7 @@ func runConnectOnConn(ctx context.Context, tcpConn net.Conn, cfg *Config, stats 
 					select {
 					case <-tcpReadDone:
 					default:
-						log.Printf("UDP read on port %d: %v", port, err)
+						ulog.Log("UDP read on port %d: %v", port, err)
 					}
 					return
 				}
@@ -126,6 +127,7 @@ func runConnectOnConn(ctx context.Context, tcpConn net.Conn, cfg *Config, stats 
 				payload := make([]byte, n)
 				copy(payload, buf[:n])
 
+				ulog.Debugf("UDP→TCP: port=%d len=%d from %s", port, n, udpAddr)
 				if err := writeFrame(tcpConn, port, payload); err != nil {
 					return
 				}
@@ -154,9 +156,11 @@ func runConnectOnConn(ctx context.Context, tcpConn net.Conn, cfg *Config, stats 
 				// Thetis IP with the frame's port as the destination port.
 				if peerIP := thetisPeerIP.Load(); peerIP != nil {
 					target = &net.UDPAddr{IP: *peerIP, Port: int(port)}
+					ulog.Debugf("TCP→UDP: port=%d len=%d, no prior sender, using last peer %s", port, len(payload), target)
 				}
 			}
 			if target == nil {
+				ulog.Debugf("TCP→UDP: port=%d len=%d dropped, no Thetis address known yet", port, len(payload))
 				continue // no Thetis address known yet; drop
 			}
 
@@ -172,9 +176,10 @@ func runConnectOnConn(ctx context.Context, tcpConn net.Conn, cfg *Config, stats 
 				continue
 			}
 
+			ulog.Debugf("TCP→UDP: port=%d len=%d → %s", port, len(payload), target)
 			n, err := pc.WriteTo(payload, target)
 			if err != nil {
-				log.Printf("UDP write to Thetis port %d: %v", port, err)
+				ulog.Log("UDP write to Thetis port %d: %v", port, err)
 				continue
 			}
 			stats.UDPBytesOut.Add(int64(n))

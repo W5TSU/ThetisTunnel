@@ -7,15 +7,16 @@ import (
 	"time"
 )
 
-func runUI(ctx context.Context, stats *Stats, cfg *Config) {
+func runUI(ctx context.Context, stats *Stats, cfg *Config, ulog *UILogger) {
 	var prevTCPIn, prevTCPOut, prevUDPIn, prevUDPOut int64
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	// Clear screen, hide cursor.
+	// Clear screen, hide cursor.  In raw mode \n does not produce \r\n, so all
+	// output in this function must use \r\n and \033[2K to avoid diagonal text.
 	fmt.Print("\033[2J\033[H\033[?25l")
-	defer fmt.Print("\033[?25h\n")
+	defer fmt.Print("\033[?25h\r\n")
 
 	for {
 		select {
@@ -46,12 +47,17 @@ func runUI(ctx context.Context, stats *Stats, cfg *Config) {
 		updatePeak(&stats.PeakUDPOut, rateUDPOut)
 
 		fmt.Print("\033[H") // move cursor to top-left
-		fmt.Printf("ThetisTunnel  mode=%-7s  [Q=quit  R=reset peaks]\n", cfg.Mode)
-		fmt.Println("─────────────────────────────────────────────────────────────")
+		fmt.Printf("\033[2KThetisTunnel  mode=%-7s  [Q=quit  R=reset peaks]\r\n", cfg.Mode)
+		fmt.Print("\033[2K─────────────────────────────────────────────────────────────\r\n")
 		printRate("TCP  IN ", rateTCPIn, stats.PeakTCPIn.Load(), cfg.MaxInRate)
 		printRate("TCP  OUT", rateTCPOut, stats.PeakTCPOut.Load(), cfg.MaxOutRate)
 		printRate("UDP  IN ", rateUDPIn, stats.PeakUDPIn.Load(), cfg.MaxInRate)
 		printRate("UDP  OUT", rateUDPOut, stats.PeakUDPOut.Load(), cfg.MaxOutRate)
+		fmt.Print("\033[2K\r\n")
+		for _, line := range ulog.Lines() {
+			fmt.Printf("\033[2K  %s\r\n", line)
+		}
+		fmt.Print("\033[J") // erase to end of screen
 	}
 }
 
@@ -90,7 +96,7 @@ func printRate(label string, rate, peak, maxRate int64) {
 		runes[peakPos] = '│'
 	}
 
-	fmt.Printf("  %s [%s] %-12s  peak: %s\n",
+	fmt.Printf("\033[2K  %s [%s] %-12s  peak: %s\r\n",
 		label,
 		string(runes),
 		formatBits(rate),

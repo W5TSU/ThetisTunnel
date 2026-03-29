@@ -31,7 +31,7 @@ func handleKeyboard(cancel context.CancelFunc, stats *Stats) {
 		}
 		switch buf[0] {
 		case 'q', 'Q', 3: // 3 = Ctrl+C
-			fmt.Println("\nQuit.")
+			fmt.Print("\r\nQuit.\r\n")
 			cancel()
 			return
 		case 'r', 'R':

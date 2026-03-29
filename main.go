@@ -26,6 +26,7 @@ type Config struct {
 	ThetisPorts    string
 	Key            string
 	NoUI           bool
+	Debug          bool
 	MaxInRate      int64 // bits/sec, for UI bar scaling
 	MaxOutRate     int64
 }
@@ -43,6 +44,7 @@ func main() {
 	thetisPorts := flag.String("thetisPorts", "1024-1029", "Thetis UDP destination ports (connect mode)")
 	key := flag.String("key", "", "Shared secret key, max 32 chars")
 	noUI := flag.Bool("noUI", false, "Disable live throughput display")
+	debug := flag.Bool("debug", false, "Log connection and protocol details")
 	maxInRate := flag.String("maxInRate", "10M", "Max IN rate for display bar scaling (e.g. 10M, 1G)")
 	maxOutRate := flag.String("maxOutRate", "10M", "Max OUT rate for display bar scaling (e.g. 10M, 1G)")
 
@@ -96,11 +98,13 @@ Options:
 		ThetisPorts:    *thetisPorts,
 		Key:            *key,
 		NoUI:           *noUI,
+		Debug:          *debug,
 		MaxInRate:      inRate,
 		MaxOutRate:     outRate,
 	}
 
 	stats := &Stats{}
+	uiLog := newUILogger(cfg.NoUI, cfg.Debug)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -112,16 +116,16 @@ Options:
 	go func() {
 		switch cfg.Mode {
 		case "listen":
-			errCh <- runListen(ctx, cfg, stats)
+			errCh <- runListen(ctx, cfg, stats, uiLog)
 		case "connect":
-			errCh <- runConnect(ctx, cfg, stats)
+			errCh <- runConnect(ctx, cfg, stats, uiLog)
 		}
 	}()
 
 	if !*noUI {
-		go runUI(ctx, stats, cfg)
+		go runUI(ctx, stats, cfg, uiLog)
+		go handleKeyboard(cancel, stats)
 	}
-	go handleKeyboard(cancel, stats)
 
 	select {
 	case sig := <-sigCh:

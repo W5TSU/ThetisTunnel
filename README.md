@@ -2,10 +2,6 @@
 
 A tool that tunnels the UDP data in/out of Thetis and a Radio, enabling remote radio operation over the internet without a VPN.
 
-A video on how it can be used with a remote G2: https://www.youtube.com/watch?v=v-leCQ6ULyQ
-
-![ThetisTunnelC](ThetisTunnelC.png)
-
 ## Source Code and Licensing
 
 **The source code for ThetisTunnel is not available and will not be provided.** The software is developed and owned by Richie (MW0LGE) of Blitter8 Ltd and is distributed as compiled binaries only.
@@ -115,6 +111,7 @@ Usage:
 |---|---|
 | `--key=VALUE` | Shared secret key (up to 32 chars); connect must match listen |
 | `--noUI` | Disable the live throughput display |
+| `--debug` | Log connection and protocol details (auth, per-frame port/length/address) |
 | `--maxInRate=VALUE` | Scale IN rate bars to VALUE bits/sec (e.g. `10M`, `1G`) |
 | `--maxOutRate=VALUE` | Scale OUT rate bars to VALUE bits/sec |
 

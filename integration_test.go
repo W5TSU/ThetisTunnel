@@ -62,7 +62,7 @@ func TestListenForwardsUDPToRadio(t *testing.T) {
 	defer clientConn.Close()
 
 	// Start listen handler (radio site).
-	go handleListenConn(ctx, serverConn, listenCfg, radioSrcPorts, &Stats{})
+	go handleListenConn(ctx, serverConn, listenCfg, radioSrcPorts, &Stats{}, nil)
 
 	// Simulate the connect side: authenticate then send a frame.
 	if err := authConnect(clientConn, "testkey"); err != nil {
@@ -117,7 +117,7 @@ func TestListenForwardsUDPFromRadio(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 
-	go handleListenConn(ctx, serverConn, listenCfg, radioSrcPorts, &Stats{})
+	go handleListenConn(ctx, serverConn, listenCfg, radioSrcPorts, &Stats{}, nil)
 
 	// Authenticate (empty key).
 	if err := authConnect(clientConn, ""); err != nil {
@@ -169,7 +169,7 @@ func TestConnectForwardsUDPToTCP(t *testing.T) {
 	}
 
 	// runConnectOnConn assumes auth is already complete; start it directly.
-	go runConnectOnConn(ctx, connectConn, connectCfg, &Stats{})
+	go runConnectOnConn(ctx, connectConn, connectCfg, &Stats{}, nil)
 
 	// Give runConnectOnConn time to bind the UDP socket.
 	time.Sleep(50 * time.Millisecond)
@@ -218,7 +218,7 @@ func TestConnectDeliversFrameToThetis(t *testing.T) {
 		Key:         "",
 	}
 
-	go runConnectOnConn(ctx, connectConn, connectCfg, &Stats{})
+	go runConnectOnConn(ctx, connectConn, connectCfg, &Stats{}, nil)
 
 	time.Sleep(50 * time.Millisecond)
 
